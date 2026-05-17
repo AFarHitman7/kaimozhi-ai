@@ -1,9 +1,36 @@
 {
-  "functions": {
-    "api/predict.py": {
-      "runtime": "python3.12",
-      "maxDuration": 30,
-      "memory": 1024
+  "version": 2,
+  "builds": [
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "actions.json",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "api/predict.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxDuration": 30,
+        "memory": 1024,
+        "includeFiles": ["lstm_sign_model.onnx", "actions.npy"]
+      }
     }
-  }
+  ],
+  "routes": [
+    {
+      "src": "/api/predict",
+      "dest": "/api/predict.py"
+    },
+    {
+      "src": "/actions.json",
+      "dest": "/actions.json"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
 }
