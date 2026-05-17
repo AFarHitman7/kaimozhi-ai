@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KaiMozhi · Live Sign Detection</title>
+<meta name="description" content="Real-time sign language detection powered by MediaPipe and LSTM">
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
+
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0f14; --bg2:#131720; --bg3:#161b27;
+  --border:#252b40; --accent:#7c8fff; --accent2:#b87cff; --accent3:#ff7cb0;
+  --green:#4dffb4; --yellow:#ffd84d; --blue:#4da6ff;
+  --text:#e8eaf0; --muted:#5a6177; --card:#1a2035;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif}
+
+/* ── Layout ── */
+.app{display:flex;flex-direction:column;min-height:100vh}
+header{padding:18px 32px;display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--border);background:var(--bg2)}
+.brand{font-family:'Space Grotesk',sans-serif;font-size:1.5rem;font-weight:700;
+  background:linear-gradient(135deg,var(--accent),var(--accent2),var(--accent3));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.status-pill{display:flex;align-items:center;gap:8px;font-size:.8rem;color:var(--muted)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.status-dot.active{background:var(--green);box-shadow:0 0 6px var(--green);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+
+main{flex:1;display:grid;grid-template-columns:1fr 380px;gap:0;max-width:1300px;
+  width:100%;margin:0 auto;padding:28px 24px;gap:24px}
+
+/* ── Video ── */
+.video-card{border-radius:18px;overflow:hidden;background:#000;
+  border:1px solid var(--border);position:relative;aspect-ratio:4/3}
+video,canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+canvas{pointer-events:none}
+.video-overlay{position:absolute;bottom:0;left:0;right:0;
+  background:linear-gradient(transparent,rgba(0,0,0,.7));padding:14px 18px;
+  display:flex;align-items:center;justify-content:space-between}
+.fps-badge{font-size:.72rem;color:rgba(255,255,255,.4);font-family:monospace}
+.buf-badge{font-size:.72rem;color:rgba(255,255,255,.35);font-family:monospace}
+.cam-btn{position:absolute;top:14px;right:14px;background:rgba(0,0,0,.5);
+  border:1px solid var(--border);color:var(--text);padding:6px 14px;border-radius:8px;
+  font-size:.78rem;cursor:pointer;backdrop-filter:blur(8px);transition:background .2s}
+.cam-btn:hover{background:rgba(255,255,255,.08)}
+
+/* ── Permission overlay ── */
+.perm-overlay{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:16px;background:var(--bg3)}
+.perm-icon{font-size:3rem}
+.perm-title{font-size:1.1rem;font-weight:600;color:var(--text)}
+.perm-sub{font-size:.85rem;color:var(--muted);text-align:center;max-width:260px}
+.perm-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#fff;border:none;border-radius:10px;padding:11px 28px;
+  font-size:.92rem;font-weight:600;cursor:pointer;transition:opacity .2s,transform .15s}
+.perm-btn:hover{opacity:.88;transform:translateY(-1px)}
+
+/* ── Right panel ── */
+.panel{display:flex;flex-direction:column;gap:16px}
+
+/* ── Detection card ── */
+.det-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:20px}
+.section-label{font-size:.75rem;font-weight:600;color:var(--accent);
+  text-transform:uppercase;letter-spacing:.12em;margin-bottom:14px;
+  padding-bottom:8px;border-bottom:1px solid var(--border)}
+.det-badge{display:inline-flex;align-items:center;gap:10px;
+  background:linear-gradient(135deg,#1a2545,#1d2a50);border:1px solid #3a4a80;
+  border-radius:50px;padding:10px 22px;font-family:'Space Grotesk',sans-serif;
+  font-size:1.5rem;font-weight:700;color:#a0b4ff;margin-bottom:10px;
+  box-shadow:0 0 30px #7c8fff22;transition:all .3s}
+.det-dot{width:10px;height:10px;background:var(--green);border-radius:50%;
+  box-shadow:0 0 8px var(--green);animation:pulse 1.4s ease-in-out infinite;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.7)}}
+.idle-msg{color:var(--muted);font-size:.88rem;padding:8px 0}
+.conf-label{font-size:.75rem;color:var(--muted);margin-bottom:4px}
+.bar-bg{background:var(--border);border-radius:99px;height:6px;overflow:hidden}
+.bar-fg{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+  transition:width .4s ease;width:0%}
+
+/* ── Metrics ── */
+.metrics-row{display:flex;gap:10px}
+.metric{flex:1;background:var(--card);border:1px solid var(--border);
+  border-radius:12px;padding:12px;text-align:center}
+.metric-val{font-family:'Space Grotesk',sans-serif;font-size:1.5rem;font-weight:700;color:var(--accent)}
+.metric-lbl{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-top:2px}
+
+/* ── History ── */
+.history-list{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto}
+.history-list::-webkit-scrollbar{width:4px}
+.history-list::-webkit-scrollbar-track{background:transparent}
+.history-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
+.hist-item{display:flex;justify-content:space-between;align-items:center;
+  padding:7px 10px;background:#13182280;border-radius:8px;
+  border-left:3px solid var(--accent);animation:slideIn .2s ease}
+@keyframes slideIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.hist-sign{font-weight:600;color:#c8d0ff;font-size:.85rem}
+.hist-conf{color:var(--muted);font-size:.73rem}
+.no-hist{color:var(--muted);font-size:.83rem;padding:4px 0}
+
+/* ── Signs pills ── */
+.signs-wrap{display:flex;flex-wrap:wrap;gap:6px}
+.sign-pill{padding:3px 12px;border-radius:50px;font-size:.73rem;font-weight:500;
+  background:#0d1a2b;color:var(--blue);border:1px solid #4da6ff44}
+
+/* ── Clear button ── */
+.clear-btn{align-self:flex-start;background:transparent;border:1px solid var(--border);
+  color:var(--muted);padding:7px 16px;border-radius:8px;font-size:.8rem;
+  cursor:pointer;transition:all .2s}
+.clear-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── Loading spinner ── */
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Error toast ── */
+.toast{position:fixed;bottom:24px;right:24px;background:#1e1020;border:1px solid #ff6b6b44;
+  color:#ff8888;padding:12px 20px;border-radius:10px;font-size:.83rem;
+  display:none;z-index:99;max-width:300px;animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+@media(max-width:900px){
+  main{grid-template-columns:1fr;padding:16px}
+  .video-card{aspect-ratio:4/3}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- Header -->
+<header>
+  <span class="brand">🤟 KaiMozhi</span>
+  <div class="status-pill">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Starting…</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- Video column -->
+  <div>
+    <div class="video-card" id="video-card">
+      <!-- Permission overlay -->
+      <div class="perm-overlay" id="perm-overlay">
+        <div class="perm-icon">📷</div>
+        <div class="perm-title">Camera access needed</div>
+        <div class="perm-sub">KaiMozhi uses your webcam locally — no video is ever sent to a server.</div>
+        <button class="perm-btn" onclick="startCamera()">Enable Camera</button>
+      </div>
+      <video id="video" playsinline autoplay muted></video>
+      <canvas id="canvas"></canvas>
+      <div class="video-overlay">
+        <span class="fps-badge" id="fps-badge">-- fps</span>
+        <span class="buf-badge" id="buf-badge">Buffer: 0%</span>
+      </div>
+      <button class="cam-btn" id="cam-btn" style="display:none" onclick="stopCamera()">⏹ Stop</button>
+    </div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="panel">
+
+    <!-- Current detection -->
+    <div class="det-card">
+      <div class="section-label">🔍 Current Detection</div>
+      <div id="badge-area"><p class="idle-msg">👋 Perform a sign gesture to begin.</p></div>
+      <div class="conf-label" id="conf-label" style="display:none">Confidence</div>
+      <div class="bar-bg" id="bar-bg" style="display:none"><div class="bar-fg" id="bar-fg"></div></div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="det-card">
+      <div class="section-label">📊 Session Stats</div>
+      <div class="metrics-row">
+        <div class="metric"><div class="metric-val" id="m-total">0</div><div class="metric-lbl">Total</div></div>
+        <div class="metric"><div class="metric-val" id="m-unique">0</div><div class="metric-lbl">Unique</div></div>
+        <div class="metric"><div class="metric-val" id="m-avg">—</div><div class="metric-lbl">Avg Conf</div></div>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="det-card">
+      <div class="section-label">📜 Detection History</div>
+      <div class="history-list" id="history-list">
+        <p class="no-hist">No detections yet.</p>
+      </div>
+      <button class="clear-btn" style="margin-top:10px" onclick="clearHistory()">🗑️ Clear</button>
+    </div>
+
+    <!-- Known signs -->
+    <div class="det-card">
+      <div class="section-label">🗂️ Known Signs</div>
+      <div class="signs-wrap" id="signs-wrap">
+        <span class="spinner"></span>
+      </div>
+    </div>
+
+  </div>
+</main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────────────────────────
+const API_URL        = "/api/predict";
+const SEQ_LEN        = 30;
+const CONF_THRESHOLD = 0.70;
+const STABILITY      = 4;
+const PREDICT_EVERY  = 2;   // run inference every N frames
+
+// ─────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────
+let sequence     = [];          // ring of keypoint vectors (max SEQ_LEN)
+let recentPreds  = [];          // ring of recent prediction indices
+let history      = [];
+let totalDet     = 0;
+let uniqueSigns  = new Set();
+let currentSign  = "";
+let currentConf  = 0;
+let frameCount   = 0;
+let frameTs      = [];          // for FPS calc
+let inferring    = false;       // prevent concurrent API calls
+let cameraActive = false;
+let mpCamera     = null;
+
+// ─────────────────────────────────────────────────────────────
+// Keypoint normalization  (must match training exactly)
+// ─────────────────────────────────────────────────────────────
+function normalizeKeypoints(flat) {
+  const out = new Float32Array(126);
+  for (let h = 0; h < 2; h++) {
+    const base = h * 63;
+    const hand = Array.from(flat.slice(base, base + 63));
+    const isZero = hand.every(v => Math.abs(v) < 1e-6);
+    if (!isZero) {
+      // Translate: make wrist (lm 0) the origin
+      const wx = hand[0], wy = hand[1], wz = hand[2];
+      for (let i = 0; i < 21; i++) {
+        hand[i*3]   -= wx;
+        hand[i*3+1] -= wy;
+        hand[i*3+2] -= wz;
+      }
+      // Scale by ||middle-finger MCP (lm 9)||
+      const dx = hand[27], dy = hand[28], dz = hand[29];
+      const scale = Math.sqrt(dx*dx + dy*dy + dz*dz) + 1e-6;
+      for (let i = 0; i < 63; i++) hand[i] /= scale;
+    }
+    out.set(hand, base);
+  }
+  return out;
+}
+
+function extractKeypoints(results) {
+  const lh = new Float32Array(63);   // zeros = hand absent
+  const rh = new Float32Array(63);
+
+  if (results.multiHandLandmarks && results.multiHandedness) {
+    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+      const lms   = results.multiHandLandmarks[i];
+      // Training used cv2.flip → swap Left/Right to compensate
+      const label = results.multiHandedness[i].label === "Left" ? "Right" : "Left";
+      const coords = new Float32Array(63);
+      for (let j = 0; j < 21; j++) {
+        coords[j*3]   = lms[j].x;
+        coords[j*3+1] = lms[j].y;
+        coords[j*3+2] = lms[j].z;
+      }
+      if (label === "Left")  lh.set(coords);
+      else                   rh.set(coords);
+    }
+  }
+
+  const raw = new Float32Array(126);
+  raw.set(lh, 0); raw.set(rh, 63);
+  return normalizeKeypoints(raw);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Inference
+// ─────────────────────────────────────────────────────────────
+async function runInference() {
+  if (inferring || sequence.length < SEQ_LEN) return;
+  inferring = true;
+  try {
+    const resp = await fetch(API_URL, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({sequence: Array.from(sequence)}),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    const idx  = data.label_idx;
+    const conf = data.confidence;
+    recentPreds.push(conf > CONF_THRESHOLD ? idx : -1);
+    if (recentPreds.length > STABILITY) recentPreds.shift();
+
+    if (recentPreds.length === STABILITY) {
+      const counts = {};
+      recentPreds.forEach(v => counts[v] = (counts[v]||0)+1);
+      const [mc, cnt] = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+      if (mc != -1 && cnt >= STABILITY - 1) {
+        const sign = data.sign;
+        if (sign && sign !== currentSign) {
+          addHistory(sign, conf);
+        }
+        currentSign = sign || "";
+        currentConf = conf;
+      } else if (mc == -1 && cnt >= STABILITY - 1) {
+        currentSign = ""; currentConf = 0;
+      }
+    }
+    updateDetectionUI();
+  } catch(e) {
+    showToast("Inference error: " + e.message);
+  } finally {
+    inferring = false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MediaPipe callback
+// ─────────────────────────────────────────────────────────────
+const video  = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx    = canvas.getContext("2d");
+
+function onResults(results) {
+  if (!cameraActive) return;
+
+  // Sync canvas size
+  canvas.width  = video.videoWidth  || canvas.offsetWidth;
+  canvas.height = video.videoHeight || canvas.offsetHeight;
+
+  // Mirror + draw video
+  ctx.save();
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+
+  // Draw landmarks (mirrored)
+  if (results.multiHandLandmarks) {
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    for (const lms of results.multiHandLandmarks) {
+      drawConnectors(ctx, lms, HAND_CONNECTIONS, {color:"#7c8fff88", lineWidth:2});
+      drawLandmarks(ctx, lms, {color:"#b87cff", lineWidth:1, radius:3});
+    }
+    ctx.restore();
+  }
+
+  // Collect keypoints
+  frameCount++;
+  const kp = extractKeypoints(results);
+  sequence.push(Array.from(kp));
+  if (sequence.length > SEQ_LEN) sequence.shift();
+
+  // FPS
+  const now = performance.now();
+  frameTs.push(now);
+  if (frameTs.length > 30) frameTs.shift();
+  if (frameTs.length > 1) {
+    const fps = Math.round((frameTs.length - 1) / ((now - frameTs[0]) / 1000));
+    document.getElementById("fps-badge").textContent = `${fps} fps`;
+  }
+  document.getElementById("buf-badge").textContent =
+    `Buffer: ${Math.round(sequence.length / SEQ_LEN * 100)}%`;
+
+  // Inference every N frames
+  if (frameCount % PREDICT_EVERY === 0) runInference();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Camera
+// ─────────────────────────────────────────────────────────────
+async function startCamera() {
+  setStatus("Starting camera…");
+  try {
+    const hands = new Hands({locateFile: f =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 0,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6,
+    });
+    hands.onResults(onResults);
+
+    mpCamera = new Camera(video, {
+      onFrame: async () => { await hands.send({image: video}); },
+      width: 640, height: 480,
+    });
+    await mpCamera.start();
+
+    cameraActive = true;
+    document.getElementById("perm-overlay").style.display = "none";
+    document.getElementById("cam-btn").style.display = "block";
+    setStatus("Detecting", true);
+  } catch(e) {
+    setStatus("Camera error");
+    showToast("Could not start camera: " + e.message);
+  }
+}
+
+function stopCamera() {
+  if (mpCamera) { mpCamera.stop(); mpCamera = null; }
+  cameraActive = false;
+  document.getElementById("perm-overlay").style.display = "flex";
+  document.getElementById("cam-btn").style.display = "none";
+  setStatus("Stopped");
+}
+
+// ─────────────────────────────────────────────────────────────
+// UI helpers
+// ─────────────────────────────────────────────────────────────
+function updateDetectionUI() {
+  const ba = document.getElementById("badge-area");
+  if (currentSign) {
+    ba.innerHTML = `<div class="det-badge"><div class="det-dot"></div>${currentSign}</div>`;
+    document.getElementById("conf-label").style.display = "block";
+    document.getElementById("conf-label").textContent = `Confidence: ${(currentConf*100).toFixed(1)}%`;
+    document.getElementById("bar-bg").style.display = "block";
+    document.getElementById("bar-fg").style.width = (currentConf*100).toFixed(1) + "%";
+  } else {
+    ba.innerHTML = `<p class="idle-msg">👋 Perform a sign gesture to begin.</p>`;
+    document.getElementById("conf-label").style.display = "none";
+    document.getElementById("bar-bg").style.display = "none";
+  }
+}
+
+function addHistory(sign, conf) {
+  totalDet++;
+  uniqueSigns.add(sign);
+  history.unshift({sign, conf, ts: Date.now()});
+  if (history.length > 30) history.pop();
+
+  // Stats
+  document.getElementById("m-total").textContent  = totalDet;
+  document.getElementById("m-unique").textContent = uniqueSigns.size;
+  const avgC = history.reduce((s,e)=>s+e.conf,0) / history.length * 100;
+  document.getElementById("m-avg").textContent = avgC.toFixed(0) + "%";
+
+  // History list
+  const hl = document.getElementById("history-list");
+  hl.innerHTML = history.slice(0,10).map(e => {
+    const t = new Date(e.ts).toLocaleTimeString();
+    return `<div class="hist-item">
+      <span class="hist-sign">${e.sign}</span>
+      <span class="hist-conf">${(e.conf*100).toFixed(1)}% · ${t}</span>
+    </div>`;
+  }).join("");
+}
+
+function clearHistory() {
+  history=[]; totalDet=0; uniqueSigns.clear(); currentSign=""; currentConf=0;
+  document.getElementById("history-list").innerHTML = `<p class="no-hist">No detections yet.</p>`;
+  document.getElementById("m-total").textContent  = "0";
+  document.getElementById("m-unique").textContent = "0";
+  document.getElementById("m-avg").textContent    = "—";
+  updateDetectionUI();
+}
+
+function setStatus(text, active=false) {
+  document.getElementById("status-text").textContent = text;
+  document.getElementById("status-dot").className = "status-dot" + (active?" active":"");
+}
+
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.style.display = "block";
+  setTimeout(()=>t.style.display="none", 4000);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Load known signs from API (first inference returns label_idx)
+// ─────────────────────────────────────────────────────────────
+async function loadSigns() {
+  try {
+    // Send a zero-filled dummy sequence to warm up the function
+    // and discover the action count from the response
+    // (We pre-populate from actions.npy indirectly via a metadata endpoint
+    //  — for now use the predict endpoint with a dummy call)
+    const dummy = Array.from({length: SEQ_LEN}, ()=>new Array(126).fill(0));
+    const r = await fetch(API_URL, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({sequence: dummy, metadata_only: true}),
+    });
+    // The /api/predict returns the sign for zero input (likely empty),
+    // so we just warm it up silently. Signs are listed separately below.
+  } catch(e) {}
+}
+
+// ─────────────────────────────────────────────────────────────
+// Populate known signs from the page itself (baked in at build time)
+// Fall back to fetching /actions.json if available
+// ─────────────────────────────────────────────────────────────
+async function populateSigns() {
+  const wrap = document.getElementById("signs-wrap");
+  try {
+    const r = await fetch("/actions.json");
+    if (!r.ok) throw new Error();
+    const signs = await r.json();
+    wrap.innerHTML = signs.map(s=>
+      `<span class="sign-pill">${s}</span>`).join("");
+  } catch {
+    wrap.innerHTML = `<span style="color:var(--muted);font-size:.8rem">
+      Sign list loads after first detection.</span>`;
+  }
+}
+
+populateSigns();
+loadSigns();
+setStatus("Ready — click Enable Camera");
+</script>
+</body>
+</html>
