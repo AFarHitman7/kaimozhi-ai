@@ -22,3 +22,5 @@ sounddevice==0.5.5
 tzdata==2025.3
 tensorflow==2.16.1
 scikit-learn>=1.3.0
+streamlit>=1.37.0
+flask>=3.0.0
