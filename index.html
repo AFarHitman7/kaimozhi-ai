@@ -40,20 +40,20 @@ main{flex:1;display:grid;grid-template-columns:1fr 380px;gap:0;max-width:1300px;
 /* ── Video ── */
 .video-card{border-radius:18px;overflow:hidden;background:#000;
   border:1px solid var(--border);position:relative;aspect-ratio:4/3}
-video,canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
-canvas{pointer-events:none}
-.video-overlay{position:absolute;bottom:0;left:0;right:0;
+video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:1}
+canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2;pointer-events:none}
+.video-overlay{position:absolute;bottom:0;left:0;right:0;z-index:3;
   background:linear-gradient(transparent,rgba(0,0,0,.7));padding:14px 18px;
   display:flex;align-items:center;justify-content:space-between}
 .fps-badge{font-size:.72rem;color:rgba(255,255,255,.4);font-family:monospace}
 .buf-badge{font-size:.72rem;color:rgba(255,255,255,.35);font-family:monospace}
-.cam-btn{position:absolute;top:14px;right:14px;background:rgba(0,0,0,.5);
+.cam-btn{position:absolute;top:14px;right:14px;z-index:3;background:rgba(0,0,0,.5);
   border:1px solid var(--border);color:var(--text);padding:6px 14px;border-radius:8px;
   font-size:.78rem;cursor:pointer;backdrop-filter:blur(8px);transition:background .2s}
 .cam-btn:hover{background:rgba(255,255,255,.08)}
 
 /* ── Permission overlay ── */
-.perm-overlay{position:absolute;inset:0;display:flex;flex-direction:column;
+.perm-overlay{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:16px;background:var(--bg3)}
 .perm-icon{font-size:3rem}
 .perm-title{font-size:1.1rem;font-weight:600;color:var(--text)}

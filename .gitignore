@@ -3,3 +3,5 @@ MP_Data/
 2. Dynamic Sign Gesture/
 __pycache__/
 *.pyc
+.vercel
+.env*.local
