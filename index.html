@@ -6,10 +6,9 @@
 <title>KaiMozhi · Live Sign Detection</title>
 <meta name="description" content="Real-time sign language detection powered by MediaPipe and LSTM">
 
-<!-- MediaPipe Hands -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<!-- MediaPipe — pinned versions so JS + WASM always match -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
@@ -156,7 +155,7 @@ canvas{pointer-events:none}
         <div class="perm-icon">📷</div>
         <div class="perm-title">Camera access needed</div>
         <div class="perm-sub">KaiMozhi uses your webcam locally — no video is ever sent to a server.</div>
-        <button class="perm-btn" onclick="startCamera()">Enable Camera</button>
+        <button class="perm-btn" id="perm-btn" onclick="startCamera()">Enable Camera</button>
       </div>
       <video id="video" playsinline autoplay muted></video>
       <canvas id="canvas"></canvas>
@@ -360,7 +359,8 @@ function onResults(results) {
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
     for (const lms of results.multiHandLandmarks) {
-      drawConnectors(ctx, lms, HAND_CONNECTIONS, {color:"#7c8fff88", lineWidth:2});
+      // Use inlined connections — HAND_CONNECTIONS global unreliable across CDN versions
+      drawConnectors(ctx, lms, HAND_CONN, {color:"#7c8fff88", lineWidth:2});
       drawLandmarks(ctx, lms, {color:"#b87cff", lineWidth:1, radius:3});
     }
     ctx.restore();
@@ -388,42 +388,79 @@ function onResults(results) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Camera
+// MediaPipe HAND_CONNECTIONS (inlined — not reliably global on all CDN versions)
 // ─────────────────────────────────────────────────────────────
+const HAND_CONN = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],[0,17]
+];
+
+// ─────────────────────────────────────────────────────────────
+// Camera  — uses getUserMedia directly (avoids Camera class conflicts)
+// ─────────────────────────────────────────────────────────────
+let _hands   = null;
+let _rafId   = null;
+let _stream  = null;
+
 async function startCamera() {
-  setStatus("Starting camera…");
+  const btn = document.getElementById("perm-btn");
+  btn.textContent = "Loading MediaPipe…";
+  btn.disabled    = true;
+  setStatus("Loading model…");
+
   try {
-    const hands = new Hands({locateFile: f =>
-      `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-    hands.setOptions({
+    // 1. Request camera
+    _stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});
+    video.srcObject = _stream;
+    await new Promise(res => { video.onloadedmetadata = res; });
+    await video.play();
+
+    // 2. Init MediaPipe Hands with pinned version WASM
+    _hands = new Hands({locateFile: f =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});
+    _hands.setOptions({
       maxNumHands: 2,
       modelComplexity: 0,
       minDetectionConfidence: 0.6,
       minTrackingConfidence: 0.6,
     });
-    hands.onResults(onResults);
+    _hands.onResults(onResults);
 
-    mpCamera = new Camera(video, {
-      onFrame: async () => { await hands.send({image: video}); },
-      width: 640, height: 480,
-    });
-    await mpCamera.start();
-
+    // 3. Drive with rAF
     cameraActive = true;
+    async function loop() {
+      if (!cameraActive) return;
+      await _hands.send({image: video});
+      _rafId = requestAnimationFrame(loop);
+    }
+    _rafId = requestAnimationFrame(loop);
+
     document.getElementById("perm-overlay").style.display = "none";
     document.getElementById("cam-btn").style.display = "block";
     setStatus("Detecting", true);
   } catch(e) {
+    btn.textContent = "Enable Camera";
+    btn.disabled    = false;
     setStatus("Camera error");
-    showToast("Could not start camera: " + e.message);
+    showToast("Camera error: " + e.message);
+    console.error(e);
   }
 }
 
 function stopCamera() {
-  if (mpCamera) { mpCamera.stop(); mpCamera = null; }
   cameraActive = false;
+  if (_rafId)  { cancelAnimationFrame(_rafId); _rafId = null; }
+  if (_hands)  { _hands.close(); _hands = null; }
+  if (_stream) { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
+  video.srcObject = null;
   document.getElementById("perm-overlay").style.display = "flex";
   document.getElementById("cam-btn").style.display = "none";
+  const btn = document.getElementById("perm-btn");
+  btn.textContent = "Enable Camera";
+  btn.disabled    = false;
   setStatus("Stopped");
 }
 
